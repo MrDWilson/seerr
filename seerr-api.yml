@@ -148,6 +148,10 @@ components:
         email:
           type: string
           example: 'user@example.com'
+        discordId:
+          type: string
+          nullable: true
+          example: '123456789'
         locale:
           type: string
           nullable: true
@@ -1267,13 +1271,56 @@ components:
           type: number
         rootFolder:
           type: string
-        ignoreQuota:
-          type: boolean
-          example: false
-          description: If true, this request will not count against the user's quota. Requires MANAGE_REQUESTS permission.
       required:
         - id
         - status
+    MediaRemovalRequest:
+      type: object
+      properties:
+        id:
+          type: number
+          example: 1
+          readOnly: true
+        status:
+          type: number
+          description: >-
+            Status of the removal request. 1 = PENDING, 2 = APPROVED,
+            3 = DECLINED, 4 = FAILED, 5 = PARTIALLY_REMOVED
+          example: 1
+          readOnly: true
+        is4k:
+          type: boolean
+          example: false
+        seasons:
+          type: array
+          nullable: true
+          description: Season numbers targeted by the removal request (TV only).
+          items:
+            type: number
+        reason:
+          type: string
+          nullable: true
+        media:
+          $ref: '#/components/schemas/MediaInfo'
+        requestedBy:
+          $ref: '#/components/schemas/User'
+        modifiedBy:
+          anyOf:
+            - $ref: '#/components/schemas/User'
+            - type: string
+              nullable: true
+        createdAt:
+          type: string
+          example: '2020-09-12T10:00:27.000Z'
+          readOnly: true
+        updatedAt:
+          type: string
+          example: '2020-09-12T10:00:27.000Z'
+          readOnly: true
+      required:
+        - id
+        - status
+        - is4k
     MediaInfo:
       type: object
       properties:
@@ -1560,10 +1607,6 @@ components:
             authMethodToken:
               type: boolean
             token:
-              type: string
-            priority:
-              type: number
-            locale:
               type: string
     NotificationEmailSettings:
       type: object
@@ -1956,10 +1999,8 @@ components:
         discordEnabledTypes:
           type: number
           nullable: true
-        discordIds:
-          type: array
-          items:
-            type: string
+        discordId:
+          type: string
           nullable: true
         pushbulletAccessToken:
           type: string
@@ -6282,6 +6323,193 @@ paths:
                           type: string
                         title:
                           type: string
+  /removal-request:
+    get:
+      summary: Get all removal requests
+      description: |
+        Returns all removal requests if the user has the `ADMIN`, `MANAGE_REQUESTS`, or `REQUEST_VIEW` permissions. Otherwise, only the logged-in user's removal requests are returned.
+      tags:
+        - removal-request
+      parameters:
+        - in: query
+          name: take
+          schema:
+            type: number
+            nullable: true
+            maximum: 100
+            example: 20
+        - in: query
+          name: skip
+          schema:
+            type: number
+            nullable: true
+            example: 0
+        - in: query
+          name: filter
+          schema:
+            type: string
+            enum: [all, pending, approved, declined, failed, partially-removed]
+            nullable: true
+        - in: query
+          name: requestedBy
+          description: Filter removal requests by the ID of the user who created them. Only available for users with `MANAGE_REQUESTS` or `REQUEST_VIEW` permissions.
+          schema:
+            type: number
+            nullable: true
+      responses:
+        '200':
+          description: Removal requests returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pageInfo:
+                    $ref: '#/components/schemas/PageInfo'
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MediaRemovalRequest'
+    post:
+      summary: Create a removal request
+      description: |
+        Creates a new removal request. Requires the `REQUEST_REMOVAL` permission.
+      tags:
+        - removal-request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - mediaId
+              properties:
+                mediaId:
+                  type: number
+                  example: 1
+                is4k:
+                  type: boolean
+                  default: false
+                reason:
+                  type: string
+                  nullable: true
+                seasons:
+                  type: array
+                  description: Season numbers to request removal for. Only valid for TV media. Must be positive integers.
+                  items:
+                    type: number
+                    minimum: 1
+                  nullable: true
+      responses:
+        '201':
+          description: Removal request created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaRemovalRequest'
+        '400':
+          description: Invalid input (e.g. seasons provided for a movie, invalid season numbers, or reason too long)
+        '401':
+          description: Not authenticated
+        '403':
+          description: User may only request removal of media they originally requested
+        '404':
+          description: Media not found
+        '409':
+          description: The user already has an active removal request for this media
+  /removal-request/{requestId}/approve:
+    post:
+      summary: Approve a removal request
+      description: |
+        Approves a removal request and executes the media removal. Requires the `MANAGE_REQUESTS` permission.
+      tags:
+        - removal-request
+      parameters:
+        - in: path
+          name: requestId
+          required: true
+          schema:
+            type: number
+      responses:
+        '200':
+          description: Removal request approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaRemovalRequest'
+        '400':
+          description: The request is not pending
+        '404':
+          description: Removal request not found
+  /removal-request/{requestId}/decline:
+    post:
+      summary: Decline a removal request
+      description: |
+        Declines a removal request. Requires the `MANAGE_REQUESTS` permission.
+      tags:
+        - removal-request
+      parameters:
+        - in: path
+          name: requestId
+          required: true
+          schema:
+            type: number
+      responses:
+        '200':
+          description: Removal request declined
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaRemovalRequest'
+        '400':
+          description: The request is not pending
+        '404':
+          description: Removal request not found
+  /removal-request/{requestId}/retry:
+    post:
+      summary: Retry a failed removal request
+      description: |
+        Retries a previously failed removal request. Requires the `MANAGE_REQUESTS` permission.
+      tags:
+        - removal-request
+      parameters:
+        - in: path
+          name: requestId
+          required: true
+          schema:
+            type: number
+      responses:
+        '200':
+          description: Removal request retried
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaRemovalRequest'
+        '400':
+          description: Only failed requests can be retried
+        '404':
+          description: Removal request not found
+  /removal-request/{requestId}:
+    delete:
+      summary: Delete a removal request
+      description: |
+        Deletes a removal request. The requester or a user with `MANAGE_REQUESTS` permission can delete.
+      tags:
+        - removal-request
+      parameters:
+        - in: path
+          name: requestId
+          required: true
+          schema:
+            type: number
+      responses:
+        '204':
+          description: Removal request deleted
+        '403':
+          description: User does not have permission to delete this removal request
+        '404':
+          description: Removal request not found
   /request:
     get:
       summary: Get all requests
@@ -6408,10 +6636,6 @@ paths:
                 userId:
                   type: number
                   nullable: true
-                ignoreQuota:
-                  type: boolean
-                  example: false
-                  description: If true, this request will not count against the user's quota. Requires MANAGE_REQUESTS permission.
               required:
                 - mediaType
                 - mediaId
@@ -7600,9 +7824,6 @@ paths:
                   type: string
                 mediaId:
                   type: number
-                userId:
-                  type: number
-                  nullable: true
       responses:
         '201':
           description: Succesfully created the issue
