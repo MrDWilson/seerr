@@ -3,6 +3,7 @@ import Header from '@app/components/Common/Header';
 import LoadingSpinner from '@app/components/Common/LoadingSpinner';
 import PageTitle from '@app/components/Common/PageTitle';
 import Tooltip from '@app/components/Common/Tooltip';
+import RemovalRequestBlock from '@app/components/RemovalRequestBlock';
 import RequestItem from '@app/components/RequestList/RequestItem';
 import { useUpdateQueryParams } from '@app/hooks/useUpdateQueryParams';
 import { Permission, useUser } from '@app/hooks/useUser';
@@ -18,6 +19,7 @@ import {
   CircleStackIcon,
   FunnelIcon,
 } from '@heroicons/react/24/solid';
+import type { MediaRemovalRequest } from '@server/entity/MediaRemovalRequest';
 import type { RequestResultsResponse } from '@server/interfaces/api/requestInterfaces';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -33,6 +35,8 @@ const messages = defineMessages('components.RequestList', {
   sortDirection: 'Toggle Sort Direction',
   unableToConnect:
     'Unable to connect to {services}. Some information may be unavailable.',
+  removalRequests: 'Removal Requests',
+  addRequests: 'Requests',
 });
 
 enum Filter {
@@ -85,6 +89,27 @@ const RequestList = () => {
           ? `&requestedBy=${router.query.userId}`
           : ''
     }`
+  );
+
+  const removalRequestScope = router.pathname.startsWith('/profile')
+    ? `&requestedBy=${currentUser?.id}`
+    : router.query.userId
+      ? `&requestedBy=${router.query.userId}`
+      : '';
+
+  const { data: removalData, mutate: revalidateRemovals } = useSWR<{
+    pageInfo: {
+      pages: number;
+      pageSize: number;
+      results: number;
+      page: number;
+    };
+    results: MediaRemovalRequest[];
+  }>(
+    // Everyone sees removal requests here: managers/REQUEST_VIEW get the global
+    // pending queue (to action), while regular users get their own requests
+    // (the API scopes non-privileged users to their own).
+    `/api/v1/removal-request?filter=pending&take=20${removalRequestScope}`
   );
 
   // Restore last set filter values on component mount
@@ -310,6 +335,37 @@ const RequestList = () => {
           </div>
         )}
 
+      {removalData && removalData.results.length > 0 && (
+        <div className="mb-6">
+          <h3 className="mb-3 text-lg font-bold text-white">
+            {intl.formatMessage(messages.removalRequests)}
+          </h3>
+          <div className="space-y-2">
+            {removalData.results.map((removalRequest) => (
+              <RemovalRequestBlock
+                key={`removal-request-${removalRequest.id}`}
+                request={removalRequest}
+                showMedia
+                onUpdate={() => {
+                  revalidateRemovals();
+                  revalidate();
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Label the standard requests group only when removal requests are also
+          shown, so the two groups read as parallel sections. */}
+      {removalData &&
+        removalData.results.length > 0 &&
+        data.results.length > 0 && (
+          <h3 className="mb-3 text-lg font-bold text-white">
+            {intl.formatMessage(messages.addRequests)}
+          </h3>
+        )}
+
       {data.results.map((request) => {
         return (
           <div className="py-2" key={`request-list-${request.id}`}>
@@ -321,27 +377,28 @@ const RequestList = () => {
         );
       })}
 
-      {data.results.length === 0 && (
-        <div className="flex w-full flex-col items-center justify-center py-24 text-white">
-          <span className="text-2xl text-gray-400">
-            {intl.formatMessage(globalMessages.noresults)}
-          </span>
-          {(currentFilter !== Filter.ALL ||
-            currentMediaType !== Filter.ALL) && (
-            <div className="mt-4">
-              <Button
-                buttonType="primary"
-                onClick={() => {
-                  setCurrentFilter(Filter.ALL);
-                  setCurrentMediaType(Filter.ALL);
-                }}
-              >
-                {intl.formatMessage(messages.showallrequests)}
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
+      {data.results.length === 0 &&
+        (!removalData || removalData.results.length === 0) && (
+          <div className="flex w-full flex-col items-center justify-center py-24 text-white">
+            <span className="text-2xl text-gray-400">
+              {intl.formatMessage(globalMessages.noresults)}
+            </span>
+            {(currentFilter !== Filter.ALL ||
+              currentMediaType !== Filter.ALL) && (
+              <div className="mt-4">
+                <Button
+                  buttonType="primary"
+                  onClick={() => {
+                    setCurrentFilter(Filter.ALL);
+                    setCurrentMediaType(Filter.ALL);
+                  }}
+                >
+                  {intl.formatMessage(messages.showallrequests)}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
       <div className="actions">
         <nav
           className="mb-3 flex flex-col items-center space-y-3 sm:flex-row sm:space-y-0"
