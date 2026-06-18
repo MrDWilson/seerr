@@ -20,3 +20,11 @@ export enum MediaStatus {
   BLOCKLISTED,
   DELETED,
 }
+
+export enum MediaRemovalRequestStatus {
+  PENDING = 1,
+  APPROVED,
+  DECLINED,
+  FAILED,
+  PARTIALLY_REMOVED,
+}
